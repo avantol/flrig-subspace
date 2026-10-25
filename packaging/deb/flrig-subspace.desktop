@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=flrig (Subspace)
+GenericName=Amateur Radio Rig Control
+Comment=flrig with PTT fixes for Subspace Edition / MAGNET
+Exec=flrig-subspace
+Icon=flrig-subspace
+Terminal=false
+Type=Application
+Categories=Network;HamRadio;

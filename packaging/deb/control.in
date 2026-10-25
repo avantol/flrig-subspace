@@ -1,0 +1,15 @@
+Package: flrig-subspace
+Version: @VERSION@
+Section: hamradio
+Priority: optional
+Architecture: amd64
+Depends: libfltk1.3t64 | libfltk1.3, libx11-6, libxft2, libudev1, libxinerama1, libxcursor1, libxfixes3, libxext6, libxrender1, libfontconfig1, libstdc++6, libc6
+Maintainer: WM8Q <ssdev.avantol@xoxy.net>
+Homepage: https://github.com/avantol/flrig-subspace
+Description: flrig rig control with PTT fixes for Subspace Edition
+ flrig 2.0.12 (W1HKJ, GPL-3.0) with fixes for stations that share one radio
+ between several programs: a PTT race that could send key for unkey (and
+ the reverse) is fixed, lock and serial-port fixes (by Ron, MAGNET group),
+ and rig.reserve_ptt, which lets Subspace Edition clear the radio line just
+ before it keys or unkeys. Installs beside a stock flrig as flrig-subspace;
+ both use ~/.flrig and port 12345, so run one at a time.
