@@ -20,6 +20,7 @@
 // along with fldigi.  If not, see <http://www.gnu.org/licenses/>.
 // ---------------------------------------------------------------------
 
+#include <assert.h>  // [subspace] the Windows (QueryPerformanceCounter) path uses assert
 #include <errno.h>
 #include <time.h>
 #include <sys/time.h>
