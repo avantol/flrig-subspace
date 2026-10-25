@@ -1903,25 +1903,31 @@ public:
 			return;
 		}
 
-		PTT = int(params[0]);
+		// [subspace] The requested state is kept LOCAL until the serial lock
+		// is held. Writing the global PTT here raced the serial loop's
+		// check_ptt() (PTT = ptt_state(), under the lock): the request then
+		// keyed the radio with the radio's OLD state -- a key request sent
+		// TX0, an unkey request sent TX1 and left the transmitter on.
+		int const want = int(params[0]);
 
 		std::stringstream s;
 		long start = zmsec();
 
-		s << ztime() << " rig.set_verify_ptt " << (PTT ? "ON " : "OFF ");
+		s << ztime() << " rig.set_verify_ptt " << (want ? "ON " : "OFF ");
 
 		xmlrpc_pending = true;
 		guard_lock ser_lock (&mutex_serial, "xml set verify ptt");
 		xmlrpc_pending = false;
 
+		PTT = want;
 		s << " @ " << ztime();
-		xml_trace(1, (PTT ? "rig_set_verify_ptt ON" : "rig_set_verify_ptt OFF"));
+		xml_trace(1, (want ? "rig_set_verify_ptt ON" : "rig_set_verify_ptt OFF"));
 
-		rigPTT(PTT);
+		rigPTT(want);
 		{
 			bool get = ptt_state();
 			int cnt = 0;
-			while ((get != PTT) && (cnt++ < 100)) {
+			while ((get != want) && (cnt++ < 100)) {
 				MilliSleep(10);
 				get = ptt_state();
 			}
@@ -1950,25 +1956,28 @@ public:
 			return;
 		}
 
-		PTT = int(params[0]);
+		// [subspace] requested state kept local until the lock is held
+		// (see rig_set_verify_ptt)
+		int const want = int(params[0]);
 
 		std::stringstream s;
 		long start = zmsec();
 
-		s << ztime() << " rig.set_ptt " << (PTT ? "ON " : "OFF ");
+		s << ztime() << " rig.set_ptt " << (want ? "ON " : "OFF ");
 
 		xmlrpc_pending = true;
 		guard_lock ser_lock (&mutex_serial, "xml set verify ptt");
 		xmlrpc_pending = false;
 
+		PTT = want;
 		s << " @ " << ztime();
-		xml_trace(1, (PTT ? "rig_set_ptt ON" : "rig_set_ptt OFF"));
+		xml_trace(1, (want ? "rig_set_ptt ON" : "rig_set_ptt OFF"));
 
-		rigPTT(PTT);
+		rigPTT(want);
 		{
 			bool get = ptt_state();
 			int cnt = 0;
-			while ((get != PTT) && (cnt++ < 100)) {
+			while ((get != want) && (cnt++ < 100)) {
 				MilliSleep(10);
 				get = ptt_state();
 			}
@@ -2034,21 +2043,24 @@ public:
 
 		std::stringstream s;
 		long start = zmsec();
-		PTT = int(params[0]);
+		// [subspace] requested state kept local until the lock is held
+		// (see rig_set_verify_ptt)
+		int const want = int(params[0]);
 
 		s << ztime();
 		#ifdef HAS_XMLRPC_CLIENT_ID
 			s << " [" << XmlRpc::client_id << "]";
 		#endif
-		s << " rig.set_ptt_fast " << (PTT ? "ON " : "OFF ");
+		s << " rig.set_ptt_fast " << (want ? "ON " : "OFF ");
 
 		xmlrpc_pending = true;
 		guard_lock ser_lock (&mutex_serial, "xml set ptt fast");
 		xmlrpc_pending = false;
 
+		PTT = want;
 		s << " @ " << ztime();
 
-		rigPTT(PTT);
+		rigPTT(want);
 
 		s << " # " << ztime() << " [ " << zmsec() - start << " msec ]";
 		xml_trace(1, s.str().c_str());
