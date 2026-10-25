@@ -1,0 +1,82 @@
+# Windows build of flrig-subspace: MSYS2 MinGW64, statically linked
+# flrig.exe (no DLLs), NSIS installer that installs BESIDE a stock flrig
+# (FLRIG_NAME=flrig-subspace: its own Program Files folder, Start menu
+# entry and uninstall entry). Settings are flrig's usual flrig.files folder.
+name: Windows build (flrig-subspace)
+
+on:
+  push:
+    branches: [subspace]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            autoconf automake make pkgconf
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-fltk
+            mingw-w64-x86_64-nsis
+
+      - name: Version
+        id: ver
+        run: |
+          # tag v2.0.12-subspace1 -> 2.0.12-subspace1; branch builds -> 2.0.12-dev.<sha>
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF#refs/tags/v}"
+          else
+            VER="2.0.12-dev.${GITHUB_SHA:0:8}"
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "Version: $VER"
+
+      - name: Configure
+        run: |
+          autoreconf -fi
+          ./configure --enable-static LDFLAGS="-static -static-libgcc -static-libstdc++"
+
+      - name: Build
+        run: make -j4
+
+      - name: Check the executable needs no MinGW DLLs
+        run: |
+          strip src/flrig.exe
+          ls -la src/flrig.exe
+          # only Windows system DLLs may appear here
+          objdump -p src/flrig.exe | grep -i "DLL Name" | tee dlls.txt
+          if grep -i -E "libstdc|libgcc|libwinpthread|libfltk|libpng|zlib" dlls.txt; then
+            echo "flrig.exe still depends on MinGW DLLs"; exit 1
+          fi
+
+      - name: Installer
+        run: |
+          VER="${{ steps.ver.outputs.ver }}"
+          cd src
+          makensis -V2 -NOCD \
+            -DINSTALLER_FILE="flrig-subspace-${VER}_setup.exe" \
+            -DLICENSE_FILE="../COPYING" \
+            -DSUPPORT_URL="https://github.com/avantol/flrig-subspace" \
+            -DUPDATES_URL="https://github.com/avantol/flrig-subspace/releases" \
+            -DFLRIG_NAME=flrig-subspace \
+            -DFLRIG_BINARY=flrig.exe \
+            -DFLRIG_VERSION="${VER}" \
+            ../data/win32/fl_app.nsi
+          ls -la *_setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flrig-subspace-windows-${{ steps.ver.outputs.ver }}
+          path: |
+            src/flrig-subspace-*_setup.exe
+            src/flrig.exe
