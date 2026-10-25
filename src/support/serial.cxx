@@ -580,12 +580,21 @@ void Cserial::FlushBuffer()
 	tcflush (fd, TCIFLUSH);
 	int bytes;
 	char uctemp[100];
-	do {
+// Bounded: a radio that keeps talking (auto-information, a late reply
+// stream) previously kept this loop, and the caller, spinning forever.
+// read() is limited to the buffer size (was 'bytes', a stack overflow
+// whenever more than 100 bytes were waiting).
+	for (int tries = 0; tries < 10; tries++) {
 		MilliSleep(5);
+		bytes = 0;
 		ioctl( fd, FIONREAD, &bytes);
-		if (bytes) read (fd, uctemp, bytes);
-	} while (bytes);
-
+		if (bytes <= 0) break;
+		while (bytes > 0) {
+			int n = read (fd, uctemp, bytes < (int)sizeof(uctemp) ? bytes : (int)sizeof(uctemp));
+			if (n <= 0) break;
+			bytes -= n;
+		}
+	}
 }
 
 //=============================================================================

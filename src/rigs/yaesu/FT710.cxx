@@ -999,7 +999,7 @@ int RIG_FT710::get_modeA()
 			for (n = 0; n < NUM_MODES; n++)
 				if (md == FT710_mode_chr[n])
 					break;
-			modeA = n;
+			if (n < NUM_MODES) modeA = n; // keep last good mode on a bad reply
 		}
 	}
 	adjust_bandwidth(modeA);
@@ -1039,7 +1039,7 @@ int RIG_FT710::get_modeB()
 			for (n = 0; n < NUM_MODES; n++)
 				if (md == FT710_mode_chr[n])
 					break;
-			modeB = n;
+			if (n < NUM_MODES) modeB = n; // keep last good mode on a bad reply
 		}
 	}
 	adjust_bandwidth(modeB);

@@ -121,7 +121,9 @@ void rigPTT(bool on)
 		fake_split(on);
 
 	try {
-		std::string smode = selrig->modes_[vfo->imode];
+		std::string smode;
+		if (vfo->imode >= 0 && vfo->imode < (int)selrig->modes_.size())
+			smode = selrig->modes_[vfo->imode];
 
 		if ((smode.find("CW") != std::string::npos) && progStatus.disable_CW_ptt) {
 			CW_ptt = on;
@@ -164,7 +166,9 @@ extern bool xml_ptt_state();
 
 bool ptt_state()
 {
-	std::string smode = selrig->modes_[vfo->imode];
+	std::string smode;
+	if (vfo->imode >= 0 && vfo->imode < (int)selrig->modes_.size())
+		smode = selrig->modes_[vfo->imode];
 
 	bool PTT = false;
 	if (progStatus.xmlrpc_rig) {
@@ -176,11 +180,17 @@ bool ptt_state()
 	else if (progStatus.serial_catptt == PTT_BOTH || progStatus.serial_catptt == PTT_GET) {
 		PTT = selrig->get_PTT();
 	}
+// DTR/RTS keying on the CAT port: rigPTT() never calls set_PTT_control()
+// for these, so for rigs that inherit rigbase::get_PTT() (FT-817/818/857/
+// 897, K3, IC-706MKIIG, IC-718, ...) the cached value never changed and the
+// rig.set_ptt confirmation loop spun its full ~1 s on every key-up, then
+// reported PTT off while transmitting.  Report the line state, as is done
+// for the separate PTT port below.
 	else if (progStatus.serial_dtrptt == PTT_BOTH || progStatus.serial_dtrptt == PTT_GET) {
-		PTT = selrig->get_PTT();
+		PTT = RigSerial->getPTT();
 	}
 	else if (progStatus.serial_rtsptt == PTT_BOTH || progStatus.serial_rtsptt == PTT_GET){
-		PTT = selrig->get_PTT();
+		PTT = RigSerial->getPTT();
 	}
 	else if (SepSerial->IsOpen() && 
 		(progStatus.sep_dtrptt == PTT_BOTH || progStatus.sep_dtrptt == PTT_GET)) {

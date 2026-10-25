@@ -309,7 +309,7 @@ bool waitCommand(
 
 // minimimum time to wait for a response
 	int timeout = (int)((nread * 2)*11000.0/RigSerial->Baud()
-		+ progStatus.use_tcpip ? progStatus.tcpip_ping_delay : 0);
+		+ (progStatus.use_tcpip ? progStatus.tcpip_ping_delay : 0));
 	while (timeout > 0) {
 		if (timeout > 10) MilliSleep(10);
 		else MilliSleep(timeout);

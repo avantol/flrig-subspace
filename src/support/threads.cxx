@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "threads.h"
 #include "util.h"
@@ -43,26 +44,41 @@ guard_lock::guard_lock(pthread_mutex_t* m, std::string h, long tout) : mutex(m) 
 	how = h;
 	time_out = tout;
 	start_time = zmsec();
-	for (int i = 0; i < 20; i++) {
-		if (pthread_mutex_trylock(mutex) == 0) {
-			std::string szlock = name(mutex);
-			szlock.append(" try lock ");
-			if (!h.empty()) {
-				how = h;
-				szlock.append(", ").append(how);
-			}
-			lock_trace(1, szlock.c_str());
-			return;
+// Wait up to 1 s, waking the moment the mutex is released (the previous
+// trylock + 50 ms sleep loop added up to 50 ms to every contended lock).
+// If that times out, log it and then WAIT for the lock: continuing without
+// it let two threads use the serial port at once (mixed replies, and the
+// destructor then unlocked a mutex this thread did not own).
+#if defined(__APPLE__) || defined(__WIN32__)
+	// portable path: no pthread_mutex_timedlock on macOS, avoid clock_gettime on Windows
+	bool locked = false;
+	for (int i = 0; i < 1000 && !locked; i++) {
+		locked = (pthread_mutex_trylock(mutex) == 0);
+		if (!locked) MilliSleep(1);
+	}
+#else
+	struct timespec deadline;
+	clock_gettime(CLOCK_REALTIME, &deadline);
+	deadline.tv_sec += 1;
+	bool locked = (pthread_mutex_timedlock(mutex, &deadline) == 0);
+#endif
+	if (locked) {
+		std::string szlock = name(mutex);
+		szlock.append(" try lock ");
+		if (!h.empty()) {
+			how = h;
+			szlock.append(", ").append(how);
 		}
-		MilliSleep(50);
+		lock_trace(1, szlock.c_str());
+		return;
 	}
 
 	std::string szlock;;
-	szlock.assign("lock FAILED ").append(name(mutex));
+	szlock.assign("lock SLOW (>1 s) ").append(name(mutex));
 	if (!h.empty())
 		szlock.append(", ").append(h);
 	failure_trace(1, szlock.c_str());
-
+	pthread_mutex_lock(mutex);
 }
 
 guard_lock::~guard_lock(void) {

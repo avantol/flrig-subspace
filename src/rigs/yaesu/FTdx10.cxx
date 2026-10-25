@@ -985,7 +985,7 @@ int RIG_FTdx10::get_modeA()
 			for (n = 0; n < NUM_MODES; n++)
 				if (md == FTdx10_mode_chr[n])
 					break;
-			modeA = n;
+			if (n < NUM_MODES) modeA = n; // keep last good mode on a bad reply
 		}
 	}
 	adjust_bandwidth(modeA);
@@ -1025,7 +1025,7 @@ int RIG_FTdx10::get_modeB()
 			for (n = 0; n < NUM_MODES; n++)
 				if (md == FTdx10_mode_chr[n])
 					break;
-			modeB = n;
+			if (n < NUM_MODES) modeB = n; // keep last good mode on a bad reply
 		}
 	}
 	adjust_bandwidth(modeB);

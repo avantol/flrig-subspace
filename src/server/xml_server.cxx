@@ -359,12 +359,18 @@ public:
 			s << " [" << XmlRpc::client_id << "]";
 		#endif
 
-		xmlrpc_pending = true;
-		guard_lock serial(&mutex_serial, "xml get split");
-		xmlrpc_pending = false;
+		int split_state = progStatus.split;
+// FLRig polls split itself (Poll tab, on by default); only go to the
+// radio when that polling is off.  Hamlib's FLRig backend asks for split
+// on every client poll, so this was a serial-lock + CAT round trip per poll.
+		if (!progStatus.poll_split) {
+			xmlrpc_pending = true;
+			guard_lock serial(&mutex_serial, "xml get split");
+			xmlrpc_pending = false;
 
-		int split_state = selrig->get_split();
-		progStatus.split = split_state;
+			split_state = selrig->get_split();
+			progStatus.split = split_state;
+		}
 
 		s << " [ " << zmsec() - t0 << " msec ]";
 		s << " rig.get_split " << (split_state ? "ON" : "OFF");
