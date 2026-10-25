@@ -17,6 +17,12 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
+      # flrig's doxygen/images/config/aux.png: "aux" is a reserved device
+      # name on Windows and git refuses to check it out unless told to
+      - name: Allow Windows-reserved file names
+        shell: pwsh
+        run: git config --global core.protectNTFS false
+
       - uses: actions/checkout@v4
 
       - uses: msys2/setup-msys2@v2
