@@ -1,4 +1,4 @@
-# Windows build of flrig-subspace: MSYS2 MinGW64, statically linked
+# Windows build of flrig-subspace: MSYS2 UCRT64, statically linked
 # flrig.exe (no DLLs), NSIS installer that installs BESIDE a stock flrig
 # (FLRIG_NAME=flrig-subspace: its own Program Files folder, Start menu
 # entry and uninstall entry). Settings are flrig's usual flrig.files folder.
@@ -27,13 +27,15 @@ jobs:
 
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          # MSYS2 builds FLTK 1.3 (what flrig needs; "fltk" is now 1.4)
+          # only for UCRT64 and the clang environments, not MINGW64
+          msystem: UCRT64
           update: true
           install: >-
             autoconf automake make pkgconf
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-fltk
-            mingw-w64-x86_64-nsis
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-fltk1.3
+            mingw-w64-ucrt-x86_64-nsis
 
       - name: Version
         id: ver
