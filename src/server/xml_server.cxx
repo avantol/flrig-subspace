@@ -56,6 +56,19 @@
 // The server
 bool xmlrpc_pending = false;
 
+// [subspace] PTT reservation -- arbitration for the transmitting program.
+// A client about to key (or unkey) calls rig.reserve_ptt(ms): the serial
+// loop then starts no new radio exchange until the PTT request arrives or
+// the reservation expires, so the key command finds the line idle instead
+// of waiting behind the loop's own polling. A reservation never keys
+// anything; every set_ptt handler ends it. Bounded (kPttReserveMaxMs) so a
+// client that reserves and goes away cannot stall polling for long.
+#include <atomic>
+static std::atomic<unsigned long long> ptt_reserve_until{0};
+static unsigned const kPttReserveMaxMs = 2000;  // CHOSEN cap
+bool ptt_reserved() { return zmsec() < ptt_reserve_until.load(); }
+static void ptt_reserve_end() { ptt_reserve_until = 0; }
+
 XML_DATA xml_A;
 XML_DATA xml_B;
 int TOD_STALE  = 200; // 0.2 seconds
@@ -1649,15 +1662,21 @@ public:
 		void execute(XmlRpcValue& params, XmlRpcValue& result) { 
 		Fl::awake(connection_ON);
 
+		// [subspace] the last reading, answered without the radio while a
+		// PTT reservation is active (see ptt_reserved)
+		static int last_val = 0;
 		if (!xcvr_online || disable_xmlrpc->value() || !selrig->has_power_out)
 			result = "0";
-		else {
+		else if (ptt_reserved()) {
+			result = std::to_string(last_val);
+		} else {
 
 			xmlrpc_pending = true;
 			guard_lock serial_lock(&mutex_serial, "xml pwr meter");
 			xmlrpc_pending = false;
 
 			int val = selrig->get_power_out();
+			last_val = val;
 			char szmeter[20];
 			snprintf(szmeter, sizeof(szmeter), "%d", val);
 			std::string result_string = szmeter;
@@ -1677,15 +1696,21 @@ public:
 		void execute(XmlRpcValue& params, XmlRpcValue& result) { 
 		Fl::awake(connection_ON);
 
+		// [subspace] the last reading, answered without the radio while a
+		// PTT reservation is active (see ptt_reserved)
+		static int last_val = 0;
 		if (!xcvr_online || disable_xmlrpc->value() || !selrig->has_swr_control)
 			result = "0";
-		else {
+		else if (ptt_reserved()) {
+			result = std::to_string(last_val);
+		} else {
 
 			xmlrpc_pending = true;
 			guard_lock serial_lock(&mutex_serial, "xml swr meter");
 			xmlrpc_pending = false;
 
 			int val = selrig->get_swr();
+			last_val = val;
 			char szmeter[20];
 			snprintf(szmeter, sizeof(szmeter), "%d", val);
 			std::string result_string = szmeter;
@@ -1716,9 +1741,14 @@ public:
 		void execute(XmlRpcValue& params, XmlRpcValue& result) {
 		Fl::awake(connection_ON);
 
+		// [subspace] the last reading, answered without the radio while a
+		// PTT reservation is active (see ptt_reserved)
+		static std::string last_swr = "0";
 		if (!xcvr_online || disable_xmlrpc->value() || !selrig->has_swr_control)
 			result = "0";
-		else {
+		else if (ptt_reserved()) {
+			result = last_swr;
+		} else {
 			PAIRS swr_pairs( define_PAIR(swr_tbl) );
 
 			xmlrpc_pending = true;
@@ -1730,6 +1760,7 @@ public:
 			char szmeter[20];
 			snprintf(szmeter, sizeof(szmeter), "%2.1f", swr);
 			std::string result_string = szmeter;
+			last_swr = result_string;
 			result = result_string;
 		}
 	}
@@ -1924,6 +1955,7 @@ public:
 		xml_trace(1, (want ? "rig_set_verify_ptt ON" : "rig_set_verify_ptt OFF"));
 
 		rigPTT(want);
+		ptt_reserve_end(); // [subspace] the reserved PTT change is done
 		{
 			bool get = ptt_state();
 			int cnt = 0;
@@ -1974,6 +2006,7 @@ public:
 		xml_trace(1, (want ? "rig_set_ptt ON" : "rig_set_ptt OFF"));
 
 		rigPTT(want);
+		ptt_reserve_end(); // [subspace] the reserved PTT change is done
 		{
 			bool get = ptt_state();
 			int cnt = 0;
@@ -2061,6 +2094,7 @@ public:
 		s << " @ " << ztime();
 
 		rigPTT(want);
+		ptt_reserve_end(); // [subspace] the reserved PTT change is done
 
 		s << " # " << ztime() << " [ " << zmsec() - start << " msec ]";
 		xml_trace(1, s.str().c_str());
@@ -2071,6 +2105,34 @@ public:
 	std::string help() { return std::string("set PTT without waiting for state change"); }
 
 } rig_set_ptt_fast(&rig_server);
+
+// [subspace] rig.reserve_ptt(ms): "I will key or unkey within ms". The
+// serial loop starts no new radio exchange meanwhile (ptt_reserved); the
+// next set_ptt ends the reservation. ms <= 0 cancels. Never keys anything.
+class rig_reserve_ptt : public XmlRpcServerMethod {
+public:
+	rig_reserve_ptt(XmlRpcServer* s) : XmlRpcServerMethod("rig.reserve_ptt", s) {}
+
+	void execute(XmlRpcValue& params, XmlRpcValue& result) {
+		Fl::awake(connection_ON);
+		int ms = int(params[0]);
+		if (ms <= 0 || !xcvr_online || disable_xmlrpc->value()) {
+			ptt_reserve_end();
+			result = 0;
+			return;
+		}
+		if (ms > (int)kPttReserveMaxMs) ms = kPttReserveMaxMs;
+		ptt_reserve_until = zmsec() + (unsigned long long)ms;
+
+		std::stringstream s;
+		s << ztime() << " rig.reserve_ptt " << ms << " msec";
+		xml_trace(1, s.str().c_str());
+		result = ms;
+	}
+
+	std::string help() { return std::string("reserve the radio for a PTT change within N msec"); }
+
+} rig_reserve_ptt(&rig_server);
 
 //------------------------------------------------------------------------------
 // Execute vfo Swap

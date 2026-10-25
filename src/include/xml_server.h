@@ -46,6 +46,11 @@
 
 extern int TOD_STALE;
 
+// [subspace] While a PTT reservation is active (rig.reserve_ptt) no stored
+// value counts as stale: other clients' reads are answered from the stored
+// values and never start a radio exchange in front of the coming PTT.
+extern bool ptt_reserved();
+
 struct XML_DATA {
 	unsigned long long int  freq;
 	unsigned long long int freq_tod;
@@ -72,7 +77,7 @@ struct XML_DATA {
 		freq_tod = zmsec();
 	}
 	bool freq_stale() {
-		return int(zmsec() - freq_tod) > TOD_STALE;
+		return int(zmsec() - freq_tod) > TOD_STALE && !ptt_reserved();
 	}
 
 	void update_mode(int md) {
@@ -80,7 +85,7 @@ struct XML_DATA {
 		mode_tod = zmsec();
 	}
 	bool mode_stale() {
-		return int(zmsec() - mode_tod) > TOD_STALE;
+		return int(zmsec() - mode_tod) > TOD_STALE && !ptt_reserved();
 	}
 
 	void update_bw(int val) {
@@ -88,7 +93,7 @@ struct XML_DATA {
 		bw_tod = zmsec();
 	}
 	bool bw_stale() {
-		return int(zmsec() - bw_tod) > TOD_STALE;
+		return int(zmsec() - bw_tod) > TOD_STALE && !ptt_reserved();
 	}
 
 	void update_ptt(int val) {
@@ -96,7 +101,7 @@ struct XML_DATA {
 		ptt_tod = zmsec();
 	}
 	bool ptt_stale() {
-		return int(zmsec() - ptt_tod) > TOD_STALE;
+		return int(zmsec() - ptt_tod) > TOD_STALE && !ptt_reserved();
 	}
 
 	void update(unsigned long long int f, int md, int val) {

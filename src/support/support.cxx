@@ -1808,9 +1808,15 @@ int read_tune()
 	return 0;
 }
 
+// [subspace] The loop yields to a waiting XML-RPC request AND to a PTT
+// reservation (rig.reserve_ptt), at every point it already checked for a
+// waiting request -- one test, so the two can never disagree.
+extern bool xmlrpc_pending;
+extern bool ptt_reserved();
+static inline bool loop_must_yield() { return xmlrpc_pending || ptt_reserved(); }
+
 void * serial_thread_loop(void *d)
 {
-extern bool xmlrpc_pending;
 
 	POLL_PAIR *rx_poll_group_1 = &RX_poll_group_1[0];
 	POLL_PAIR *rx_poll_group_2 = &RX_poll_group_2[0];
@@ -1830,7 +1836,7 @@ extern bool xmlrpc_pending;
 			goto serial_bypass_loop;
 		}
 
-		if (xmlrpc_pending)
+		if (loop_must_yield())
 			goto serial_bypass_loop;
 
 		if (RigSerial->failed() >= MAX_FAILURES) {
@@ -1842,7 +1848,7 @@ extern bool xmlrpc_pending;
 			guard_lock lk( &mutex_serial, std::string(__func__).append(" ").append("ptt"));
 			check_ptt();
 		}
-		if (xmlrpc_pending) goto serial_bypass_loop;
+		if (loop_must_yield()) goto serial_bypass_loop;
 
 		if (PTT || (!PTT && read_tune()) ||
 			cwio_process == SEND ||
@@ -1860,11 +1866,11 @@ extern bool xmlrpc_pending;
 					std::string(__func__).append(" ").append("vfo"));
 				read_vfo();
 			}
-			if (xmlrpc_pending) goto serial_bypass_loop;
+			if (loop_must_yield()) goto serial_bypass_loop;
 
 			while ( tx_polling->poll != NULL ) {
 				Fl::awake();
-				if (xmlrpc_pending ||
+				if (loop_must_yield() ||
 					!(PTT ||
 					  (cwio_process == SEND) ||
 					  (cwio_process == CALIBRATE) ||
@@ -1880,7 +1886,7 @@ extern bool xmlrpc_pending;
 			}
 			if (tx_polling->poll == NULL)
 				tx_polling = &TX_poll_pairs[0];
-			if (xmlrpc_pending) goto serial_bypass_loop;
+			if (loop_must_yield()) goto serial_bypass_loop;
 
 		} else {
 
@@ -1893,7 +1899,7 @@ extern bool xmlrpc_pending;
 
 			while ( (rx_poll_group_1->poll != NULL) ) {
 				Fl::awake();
-				if (xmlrpc_pending || PTT) break;
+				if (loop_must_yield() || PTT) break;
 				if (*rx_poll_group_1->poll) {
 					guard_lock lk( &mutex_serial,
 						std::string(__func__).append(" ").append(rx_poll_group_1->name));
@@ -1905,11 +1911,11 @@ extern bool xmlrpc_pending;
 			}
 			if ((rx_poll_group_1)->poll == NULL)
 				rx_poll_group_1 = &RX_poll_group_1[0];
-			if (xmlrpc_pending) goto serial_bypass_loop;
+			if (loop_must_yield()) goto serial_bypass_loop;
 
 			while ( (rx_poll_group_2->poll != NULL) ) {
 				Fl::awake();
-				if (xmlrpc_pending || PTT) break;
+				if (loop_must_yield() || PTT) break;
 				if (*rx_poll_group_2->poll) {
 					guard_lock lk( &mutex_serial,
 						std::string(__func__).append(" ").append(rx_poll_group_2->name));
@@ -1921,11 +1927,11 @@ extern bool xmlrpc_pending;
 			}
 			if ((rx_poll_group_2)->poll == NULL)
 				rx_poll_group_2 = &RX_poll_group_2[0];
-			if (xmlrpc_pending) goto serial_bypass_loop;
+			if (loop_must_yield()) goto serial_bypass_loop;
 
 			while ( (rx_poll_group_3->poll != NULL) ) {
 				Fl::awake();
-				if (xmlrpc_pending || PTT) break;
+				if (loop_must_yield() || PTT) break;
 				if (*rx_poll_group_3->poll) {
 					guard_lock lk( &mutex_serial,
 						std::string(__func__).append(" ").append(rx_poll_group_3->name));
@@ -1937,7 +1943,7 @@ extern bool xmlrpc_pending;
 			}
 			if ((rx_poll_group_3)->poll == NULL)
 				rx_poll_group_3 = &RX_poll_group_3[0];
-			if (xmlrpc_pending) goto serial_bypass_loop;
+			if (loop_must_yield()) goto serial_bypass_loop;
 
 			if (menu1 < 9  && selrig->name_ == rig_QCXP.name_) {
 				guard_lock lk( &mutex_serial,
