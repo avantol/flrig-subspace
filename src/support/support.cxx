@@ -1823,6 +1823,7 @@ void * serial_thread_loop(void *d)
 	POLL_PAIR *rx_poll_group_3 = &RX_poll_group_3[0];
 	POLL_PAIR *tx_polling = &TX_poll_pairs[0];
 	bool isRX = false;
+	bool tuning = false; // [subspace] read_tune() result, read under the lock
 
 	for(;;) {
 
@@ -1850,7 +1851,19 @@ void * serial_thread_loop(void *d)
 		}
 		if (loop_must_yield()) goto serial_bypass_loop;
 
-		if (PTT || (!PTT && read_tune()) ||
+		// [subspace] read_tune() is a radio exchange (get_tune) and ran here
+		// WITHOUT mutex_serial, once per receive cycle: an XML-RPC request or
+		// PTT command holding the lock could be on the serial port at the
+		// same time -- two commands mixed on the wire, replies read by the
+		// wrong thread, and the shared cmd/replystr strings written by two
+		// threads at once (ThreadSanitizer, 2026-10-25).
+		tuning = false;
+		if (!PTT) {
+			guard_lock lk( &mutex_serial, std::string(__func__).append(" ").append("tune"));
+			tuning = read_tune();
+		}
+
+		if (PTT || tuning ||
 			cwio_process == SEND ||
 			cwio_process == CALIBRATE ||
 			cwio_process == KEYDOWN ) {
