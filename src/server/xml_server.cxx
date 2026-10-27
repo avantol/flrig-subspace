@@ -64,9 +64,17 @@ bool xmlrpc_pending = false;
 // anything; every set_ptt handler ends it. Bounded (kPttReserveMaxMs) so a
 // client that reserves and goes away cannot stall polling for long.
 #include <atomic>
+#include <chrono>
+// The deadline is on a MONOTONIC clock: zmsec() is gettimeofday, so a
+// clock step backwards would extend a reservation past its cap and a step
+// forwards would end it early (N1MAG review 2026-10-27).
+static unsigned long long reserve_clock_ms() {
+	return (unsigned long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 static std::atomic<unsigned long long> ptt_reserve_until{0};
 static unsigned const kPttReserveMaxMs = 2000;  // CHOSEN cap
-bool ptt_reserved() { return zmsec() < ptt_reserve_until.load(); }
+bool ptt_reserved() { return reserve_clock_ms() < ptt_reserve_until.load(); }
 static void ptt_reserve_end() { ptt_reserve_until = 0; }
 
 XML_DATA xml_A;
@@ -376,7 +384,12 @@ public:
 // FLRig polls split itself (Poll tab, on by default); only go to the
 // radio when that polling is off.  Hamlib's FLRig backend asks for split
 // on every client poll, so this was a serial-lock + CAT round trip per poll.
-		if (!progStatus.poll_split) {
+// [subspace] ... and not during a PTT reservation: this was the one getter
+// that still went to the radio while a client was about to key, so a split
+// query could delay the very PTT the reservation protects (N1MAG review
+// 2026-10-27). While reserved, the last known state is answered, as the
+// meter getters already do.
+		if (!progStatus.poll_split && !ptt_reserved()) {
 			xmlrpc_pending = true;
 			guard_lock serial(&mutex_serial, "xml get split");
 			xmlrpc_pending = false;
@@ -2122,7 +2135,7 @@ public:
 			return;
 		}
 		if (ms > (int)kPttReserveMaxMs) ms = kPttReserveMaxMs;
-		ptt_reserve_until = zmsec() + (unsigned long long)ms;
+		ptt_reserve_until = reserve_clock_ms() + (unsigned long long)ms;
 
 		std::stringstream s;
 		s << ztime() << " rig.reserve_ptt " << ms << " msec";
