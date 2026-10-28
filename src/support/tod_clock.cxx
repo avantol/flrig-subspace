@@ -46,26 +46,35 @@
 #include "tod_clock.h"
 #include "timeops.h"
 
+// [subspace5] These helpers are called from the serial loop, the XML-RPC
+// server threads and the GUI at the same time. The timeval, tm and text
+// buffer used to be ONE static each, shared by every thread: a second
+// caller could overwrite tv between gettimeofday() and the arithmetic
+// (zmsec, zusec: a torn millisecond count feeding the cache-staleness
+// tests in xml_server.h) or overwrite the text while another thread was
+// still streaming it (ztime). Scratch values are now locals; the text
+// buffer ztime() returns is one per thread, so the returned pointer stays
+// valid for the immediate use every caller makes of it.
 ullint zmsec()
 {
-	static struct timeval tv;
+	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return (tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL));
 }
 
 ullint zusec()
 {
-	static struct timeval tv;
+	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return (tv.tv_sec * 1000000LL + tv.tv_usec);
 }
 
 char *ztime()
 {
-	static char exttime[13];
+	static thread_local char exttime[13];
 
-	static struct tm tim;
-	static struct timeval tv;
+	struct tm tim;
+	struct timeval tv;
 
 	gettimeofday(&tv, NULL);
 	time_t tval = tv.tv_sec;
