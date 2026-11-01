@@ -38,6 +38,10 @@ enum BAUDS {
 extern const char *szBaudRates[];
 
 extern bool startXcvrSerial();
+extern bool serial_port_moved();     // [subspace #333]
+extern bool serial_device_present(); // [subspace #333]
+extern bool serial_port_lost();      // [subspace #333]
+extern bool serial_reopen();         // [subspace #333]
 extern bool startAuxSerial();
 extern bool startSepSerial();
 

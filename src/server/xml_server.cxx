@@ -46,6 +46,7 @@
 #include "trace.h"
 
 #include "xml_server.h"
+#include "rig_io.h"   // [subspace #333] serial_port_lost()
 #include "XmlRpc.h"
 #include "tod_clock.h"
 #include "cwioUI.h"
@@ -2000,6 +2001,9 @@ public:
 			result = 0;
 			return;
 		}
+		// [subspace #333] no serial port, no radio: a fault, never a fake OK
+		if (serial_port_lost())
+			throw XmlRpcException("flrig: transceiver serial port not open (unplugged or re-enumerated); PTT refused", -32000);
 
 		// [subspace] requested state kept local until the lock is held
 		// (see rig_set_verify_ptt)
@@ -2086,6 +2090,9 @@ public:
 			result = 0;
 			return;
 		}
+		// [subspace #333] no serial port, no radio: a fault, never a fake OK
+		if (serial_port_lost())
+			throw XmlRpcException("flrig: transceiver serial port not open (unplugged or re-enumerated); PTT refused", -32000);
 
 		std::stringstream s;
 		long start = zmsec();
@@ -5327,10 +5334,30 @@ public:
 pthread_t *xml_thread = 0;
 
 static bool run_server = false;
+static int  xml_bind_port = 12345;   // [subspace #334]
 
+// [subspace #334, 2026-11-01] The bind used to happen once, in
+// start_server(), and a failure left flrig running with no server. Now
+// the server thread binds, and retries once a second for 60 s (CHOSEN:
+// TIME_WAIT lasts 60 s on Linux and Windows, so a restart-too-soon is
+// always inside it), logging every 10 s, before giving up with a plain
+// line in the log.
 void * xml_thread_loop(void *d)
 {
 	run_server = true;
+	int tries = 0;
+	while (run_server && !rig_server.bindAndListen(xml_bind_port)) {
+		if (tries % 10 == 0)
+			LOG_ERROR("XML-RPC port %d busy (a previous flrig's connections still closing?): retrying, %d s left",
+				xml_bind_port, 60 - tries);
+		if (++tries >= 60) {
+			LOG_ERROR("XML-RPC port %d still busy after 60 s: NO XML-RPC server this run", xml_bind_port);
+			return NULL;
+		}
+		MilliSleep(1000);
+	}
+	if (!run_server) return NULL;
+	rig_server.enableIntrospection(true);
 	for(;;) {
 		if (!run_server) break;
 		rig_server.work(-1.0);
@@ -5347,10 +5374,7 @@ void start_server(int port)
 #if !defined(__WIN32__) && !defined(__APPLE__)
 	rig_server.useUDS( progStatus.use_UDS );
 #endif
-	rig_server.bindAndListen(port);
-
-// Enable introspection
-	rig_server.enableIntrospection(true);
+	xml_bind_port = port;   // [subspace #334] bound (with retries) in xml_thread_loop
 
 	xml_thread = new pthread_t;
 	if (pthread_create(xml_thread, NULL, xml_thread_loop, NULL)) {

@@ -1695,6 +1695,25 @@ void serviceB(XCVR_STATE nuvals)
 
 #define MAX_FAILURES 5
 
+// [subspace #333] colour of the connect box while exchanges time out /
+// after a re-open on the live device
+static bool serial_failing_shown = false;
+static bool serial_lost = false;            // [subspace #333] port closed, device awaited
+static unsigned long serial_lost_try = 0;   // zmsec() of the last open attempt
+void serial_failing(void *)
+{
+	box_xcvr_connect->color(FL_YELLOW);
+	box_xcvr_connect->tooltip("no response from transceiver");
+	box_xcvr_connect->redraw();
+}
+void serial_reopened(void *)
+{
+	serial_failing_shown = false;
+	box_xcvr_connect->color(FL_GREEN);
+	box_xcvr_connect->tooltip("");
+	box_xcvr_connect->redraw();
+}
+
 void serial_failed(void *)
 {
 	bypass_serial_thread_loop = true;
@@ -1840,7 +1859,49 @@ void * serial_thread_loop(void *d)
 		if (loop_must_yield())
 			goto serial_bypass_loop;
 
+		// [subspace #333] timeouts: yellow box first; at MAX_FAILURES, if the
+		// serial device moved under us, re-open it on the live name and go
+		// on (never while PTT is on); otherwise the old "not responding" stop
+		if (RigSerial->failed() > 0 && !serial_failing_shown) {
+			serial_failing_shown = true;
+			Fl::awake(serial_failing);
+		} else if (RigSerial->failed() == 0 && serial_failing_shown) {
+			Fl::awake(serial_reopened);
+		}
+		// Lost: the device moved or went away. Try the configured port once a
+		// second until it is back; a replug takes seconds to minutes (the
+		// first version tried once, 3 s after the unplug, found nothing and
+		// fell into the give-up stop: field 2026-11-01 11:37). Meanwhile the
+		// box is yellow, PTT requests are refused (xml_server.cxx), getters
+		// answer the cache, nothing is polled.
+		if (serial_lost) {
+			if (zmsec() - serial_lost_try >= 1000) {
+				serial_lost_try = zmsec();
+				bool ok = false;
+				if (serial_device_present()) {
+					guard_lock lk( &mutex_serial, std::string(__func__).append(" ").append("reopen"));
+					ok = serial_reopen();
+				}
+				if (ok) {
+					serial_lost = false;
+					Fl::awake(serial_reopened);
+				}
+			}
+			goto serial_bypass_loop;
+		}
 		if (RigSerial->failed() >= MAX_FAILURES) {
+			if (!PTT && serial_port_moved()) {
+				{
+					guard_lock lk( &mutex_serial, std::string(__func__).append(" ").append("lost"));
+					RigSerial->ClosePort();
+				}
+				serial_lost = true;
+				serial_lost_try = 0;
+				LOG_ERROR("serial port %s lost (device moved or gone): closed, retrying the open every second",
+					progStatus.xcvr_serial_port.c_str());
+				Fl::awake(serial_failing);
+				goto serial_bypass_loop;
+			}
 			Fl::awake(serial_failed);
 		}
 

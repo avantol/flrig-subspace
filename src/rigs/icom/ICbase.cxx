@@ -187,6 +187,7 @@ bool RIG_ICOM::waitFOR(size_t n, const char *sz, ullint timeout)
 					retnbr,
 					(int)(zmsec() - tstart), 
 					str2hex(replystr.c_str(), replystr.length()));
+			RigSerial->failed(-1);   // [subspace #333] see below
 			return true;
 		}
 		MilliSleep(1);
@@ -196,6 +197,14 @@ bool RIG_ICOM::waitFOR(size_t n, const char *sz, ullint timeout)
 			sz,
 			(int)(zmsec() - tstart),
 			str2hex(replystr.c_str(), replystr.length()));
+	// [subspace #333, 2026-11-01] The generic exchange (rig_io.cxx wait_char
+	// etc.) counts timeouts in RigSerial->failed(), and the serial loop acts
+	// on MAX_FAILURES ("Transceiver not responding!"); this Icom exchange
+	// never did, so an Icom whose serial device vanished (USB re-enumeration,
+	// WM8Q 2026-11-01: 1937 FAILED lines, every client answered from the
+	// cache, no status anywhere) ran on forever. Same convention as the
+	// generic path: one up per timeout, one down per answer.
+	if (!progStatus.use_tcpip) RigSerial->failed(1);
 	return false;
 }
 

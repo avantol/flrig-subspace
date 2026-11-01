@@ -131,12 +131,17 @@ XmlRpcServer::bindAndListen(int port, int backlog /*= 5*/)
     std::cout << "Set to non blocking" << std::endl;
 
   // Allow this port to be re-bound immediately so server re-starts are not delayed
-//  if ( ! XmlRpcSocket::setReuseAddr(fd))
-//  {
-//    this->close();
-//    XmlRpcUtil::error("XmlRpcServer::bindAndListen: Could not set SO_REUSEADDR socket option (%s).", XmlRpcSocket::getErrorMsg().c_str());
-//    return false;
-//  }
+  // [subspace #334, 2026-11-01] enabled: without it a flrig started within
+  // 60 s of the previous one (its client connections still in TIME_WAIT)
+  // failed the bind and ran with no XML-RPC server at all (WM8Q: 80 s of
+  // "FLRig did not accept connections"). SO_REUSEADDR lets a listener bind
+  // over TIME_WAIT sockets; two live listeners still conflict as before.
+  if ( ! XmlRpcSocket::setReuseAddr(fd))
+  {
+    this->close();
+    XmlRpcUtil::error("XmlRpcServer::bindAndListen: Could not set SO_REUSEADDR socket option (%s).", XmlRpcSocket::getErrorMsg().c_str());
+    return false;
+  }
 
   // Bind to the specified port on the default interface
   // optionally use Unix Domain Socket interface on Linux

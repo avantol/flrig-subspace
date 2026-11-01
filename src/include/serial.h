@@ -43,6 +43,7 @@ public:
 	bool CheckPort(std::string);
 
 	bool IsOpen() { return fd < 0 ? 0 : 1; };
+	int  Fd() { return fd; };   // [subspace #333] for the /proc/self/fd identity check
 	void ClosePort();
 
 	void Device (std::string dev) { device = dev;};

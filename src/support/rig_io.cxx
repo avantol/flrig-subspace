@@ -32,6 +32,14 @@
 #include "status.h"
 #include "rigbase.h"
 #include "rig_io.h"
+
+// [subspace #333] realpath / readlink / strcmp / PATH_MAX
+#include <stdlib.h>
+#include <string.h>
+#include <limits.h>
+#ifndef __WIN32__
+#include <unistd.h>
+#endif
 #include "icons.h"
 #include "tod_clock.h"
 
@@ -53,6 +61,85 @@ int BaudRate(int n)
 	return (iBaudRates[n]);
 }
 
+
+// [subspace #333, 2026-11-01] When the rig's USB adapter re-enumerates
+// (sleep/resume, a hub reset, a cable knock) the device comes back under a
+// new name (ttyUSB0 -> ttyUSB1) and the old one is deleted, but flrig keeps
+// the deleted one open: every exchange then times out while the clients are
+// answered from the cache. Replugging the cable cannot fix that; only a
+// re-open can. serial_port_moved(): the device flrig has open is no longer
+// the one the configured port name resolves to (a by-id symlink, or a bare
+// ttyUSBn that moved). Linux only: /proc/self/fd gives the open device's
+// name, "(deleted)" when it is gone. Elsewhere: never moved.
+bool serial_port_moved()
+{
+#if defined(__linux__)
+	if (progStatus.use_tcpip || !RigSerial->IsOpen()) return false;
+	char want[PATH_MAX], have[PATH_MAX], link[64];
+	if (!realpath(progStatus.xcvr_serial_port.c_str(), want))
+		return true;                       // the configured device is gone
+	snprintf(link, sizeof(link), "/proc/self/fd/%d", RigSerial->Fd());
+	ssize_t n = readlink(link, have, sizeof(have) - 1);
+	if (n < 0) return false;
+	have[n] = 0;
+	return strcmp(want, have) != 0;        // "(deleted)", or another device
+#else
+	return false;
+#endif
+}
+
+// The configured serial device exists right now (a replug or re-enumeration
+// has finished; the by-id symlink resolves). Always true where there is no
+// serial device to lose.
+bool serial_device_present()
+{
+	if (progStatus.use_tcpip ||
+		progStatus.xcvr_serial_port == "NONE" ||
+		progStatus.xcvr_serial_port == "xml_client") return true;
+#if defined(__linux__)
+	char want[PATH_MAX];
+	return realpath(progStatus.xcvr_serial_port.c_str(), want) != NULL;
+#else
+	return true;
+#endif
+}
+
+// A serial rig whose port is NOT open: flrig has nothing to talk to. The
+// PTT handlers refuse with an XML-RPC fault in this state instead of the
+// old 0 ms "OK" that keyed nothing (field 2026-11-01 11:38: three Tunes
+// answered at once, no RF, no error anywhere).
+bool serial_port_lost()
+{
+	if (progStatus.use_tcpip ||
+		progStatus.xcvr_serial_port == "NONE" ||
+		progStatus.xcvr_serial_port == "xml_client") return false;
+	return !RigSerial->IsOpen();
+}
+
+// Close the dead descriptor and open the configured port again (it resolves
+// to the live device now). Caller holds mutex_serial and PTT is off: a keyed
+// radio must not get its port closed under it. Logged at the default level.
+bool serial_reopen()
+{
+	std::string had = "none";
+#if defined(__linux__)
+	char link[64], have[PATH_MAX];
+	snprintf(link, sizeof(link), "/proc/self/fd/%d", RigSerial->Fd());
+	ssize_t n = readlink(link, have, sizeof(have) - 1);
+	if (n > 0) { have[n] = 0; had = have; }
+#endif
+	RigSerial->ClosePort();
+	if (!startXcvrSerial()) {
+		LOG_ERROR("serial port %s: re-open FAILED (had %s)",
+			progStatus.xcvr_serial_port.c_str(), had.c_str());
+		return false;
+	}
+	bypass_serial_thread_loop = false;   // startXcvrSerial() sets it for init
+	RigSerial->failed(0);
+	LOG_ERROR("serial port %s re-opened: had %s, now %s",
+		progStatus.xcvr_serial_port.c_str(), had.c_str(), RigSerial->Device().c_str());
+	return true;
+}
 
 bool startXcvrSerial()
 {
