@@ -29,6 +29,7 @@
 #include "yaesu/FT817BB.h"
 
 #include "rigpanel.h"
+#include "ptt.h"
 
 static const char FT817BBname_[] = "FT-817BB";
 static std::vector<std::string>FT817BBmodes_;
@@ -339,6 +340,23 @@ void RIG_FT817BB::set_PTT_control(int val)
 	sendCommand(cmd);
 	setthex("set_PTT_control");
 	ptt_ = val;
+	ft8x7_log_ptt_command(name_, val);
+}
+
+// [subspace] The radio's own PTT state: 0xF7 (read TX status) answers 0xFF
+// while receiving and anything else while transmitting, whatever keyed it
+// (Hamlib's ft817.c reads it the same way). No reply: FLRig's record of its
+// last PTT command, as before this change.
+int RIG_FT817BB::get_PTT()
+{
+	init_cmd();
+	cmd[4] = 0xF7;
+	int ret = waitN(1, 100, "get TX status", HEX);
+	getthex("get_PTT");
+	int reply = (ret == 1) ? (replystr[0] & 0xFF) : -1;
+	ft8x7_log_ptt_answer(name_, reply);
+	if (reply < 0) return ptt_;
+	return reply != 0xFF;
 }
 
 // mapping for smeter and power out

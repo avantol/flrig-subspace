@@ -1253,13 +1253,13 @@ void set_ptt(void *d)
 	show_meters(d);
 }
 
+// [subspace] The FT-817/817BB/818 are no longer skipped here: their drivers
+// now read the radio's own PTT state (0xF7), so they are polled like every
+// other radio. Before, they had no PTT read and this loop was skipped for
+// them by name (upstream 63ab1da3, 2022), so a radio left transmitting
+// was never seen.
 void check_ptt()
 {
-	if (selrig->name_ == rig_FT817.name_ ||
-		selrig->name_ == rig_FT817BB.name_ ||
-		selrig->name_ == rig_FT818ND.name_ ) {
-		return;
-	}
 	PTT = ptt_state();
 	xml_A.update_ptt(PTT);
 }

@@ -19,6 +19,7 @@
 // ----------------------------------------------------------------------------
 
 #include <stdlib.h>
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -163,6 +164,45 @@ void rigPTT(bool on)
 }
 
 extern bool xml_ptt_state();
+
+// [subspace] FT-817/817BB/818 PTT log, in debug_log.txt (written at every
+// log level). One line per PTT command sent to the radio, and one per change
+// in what the radio itself answers to 0xF7 (read TX status), with the time
+// since the last command: the log shows whether the radio followed each
+// command and whether it ever transmitted with no command asking for it.
+// Called with the serial lock held (set_PTT_control, get_PTT).
+static int ft8x7_cmd = -1;   // last PTT command sent: 1 ON, 0 OFF, -1 none yet
+static int ft8x7_radio = -2; // last radio answer logged: 1 TX, 0 RX, -1 no reply, -2 none yet
+static std::chrono::steady_clock::time_point ft8x7_cmd_at;
+
+void ft8x7_log_ptt_command(const std::string &rig, int on)
+{
+	ft8x7_cmd = on ? 1 : 0;
+	ft8x7_cmd_at = std::chrono::steady_clock::now();
+	LOG_ERROR("%s: PTT command %s sent to the radio", rig.c_str(), on ? "ON" : "OFF");
+}
+
+void ft8x7_log_ptt_answer(const std::string &rig, int reply)
+{
+	int radio = (reply < 0) ? -1 : (reply != 0xFF);
+	if (radio == ft8x7_radio) return;
+	ft8x7_radio = radio;
+
+	std::string since = "no PTT command sent yet";
+	if (ft8x7_cmd >= 0) {
+		long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - ft8x7_cmd_at).count();
+		since = std::to_string(ms) + " ms after PTT command " + (ft8x7_cmd ? "ON" : "OFF");
+	}
+	if (radio < 0) {
+		LOG_ERROR("%s: radio gave no TX status reply (%s); PTT reported from the last command",
+			rig.c_str(), since.c_str());
+		return;
+	}
+	LOG_ERROR("%s: radio %s (TX status 0x%02X), %s%s",
+		rig.c_str(), radio ? "TRANSMITTING" : "receiving", reply, since.c_str(),
+		(ft8x7_cmd >= 0 && radio != ft8x7_cmd) ? "  <== NOT what the last command asked" : "");
+}
 
 bool ptt_state()
 {

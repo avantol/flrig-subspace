@@ -39,6 +39,7 @@ public:
 	void selectB();
 
 	void set_PTT_control(int val);
+	int  get_PTT();
 	void set_modeA(int val);
 	int  get_modeA();
 	void set_modeB(int val);

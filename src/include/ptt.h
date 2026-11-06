@@ -32,4 +32,8 @@ enum {PTT_NONE, PTT_BOTH, PTT_SET, PTT_GET};
 extern void rigPTT(bool);
 extern bool ptt_state();
 
+// [subspace] FT-817/817BB/818 PTT log (see ptt.cxx)
+extern void ft8x7_log_ptt_command(const std::string &rig, int on);
+extern void ft8x7_log_ptt_answer(const std::string &rig, int reply);
+
 #endif
