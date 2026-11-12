@@ -35,6 +35,8 @@ namespace XmlRpc {
 
 	extern std::string request_str;
 	extern std::string client_id;
+	// [subspace] HTTP User-Agent of the request being executed ("" = none sent)
+	extern std::string user_agent;
 
   // An abstract class supporting XML RPC methods
   class XmlRpcServerMethod;

@@ -89,6 +89,9 @@ namespace XmlRpc {
 
     //! Whether to keep the current client connection open for further requests
     bool _keepAlive;
+
+    //! [subspace] HTTP User-Agent of this connection's current request
+    std::string _userAgent;
   };
 } // namespace XmlRpc
 

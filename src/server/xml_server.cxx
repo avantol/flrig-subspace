@@ -78,6 +78,52 @@ static unsigned const kPttReserveMaxMs = 2000;  // CHOSEN cap
 bool ptt_reserved() { return reserve_clock_ms() < ptt_reserve_until.load(); }
 static void ptt_reserve_end() { ptt_reserve_until = 0; }
 
+// [subspace] Un-key block -- the Arbiter's hold, carried out where a program's
+// own switch holds it only in part. A held VarAC drops VARA's key but still
+// sends VARA's un-key (bench 2026-11-11), which cuts whoever is transmitting.
+// While the Arbiter holds such a program it calls rig.block_unkey(label, ms):
+// a PTT OFF carrying that HTTP User-Agent is then answered and not carried
+// out -- unless that label made the radio's current key, or no key is on
+// record (a program's own key can always be ended). Renewed by the Arbiter;
+// it lapses by itself, so a stopped Arbiter leaves flrig as before.
+#include <mutex>
+static std::mutex unkey_block_mx;
+static std::string unkey_block_label;   // under unkey_block_mx
+static unsigned long long unkey_block_until = 0;   // under unkey_block_mx
+static std::string key_owner;   // label of the request that made the current key; "" = none on record
+static unsigned const kUnkeyBlockMaxMs = 15000;  // CHOSEN cap: the Arbiter renews every 5 s
+
+// true: this PTT OFF is to be answered and not carried out
+static bool unkey_blocked(int want) {
+	if (want) return false;
+	std::lock_guard<std::mutex> lk(unkey_block_mx);
+	if (unkey_block_label.empty() || reserve_clock_ms() >= unkey_block_until) return false;
+	if (XmlRpc::user_agent != unkey_block_label) return false;
+	if (key_owner.empty() || key_owner == unkey_block_label) return false;
+	return true;
+}
+
+// called after a PTT change was carried out
+static void note_key(int want) {
+	std::lock_guard<std::mutex> lk(unkey_block_mx);
+	if (want) key_owner = XmlRpc::user_agent.empty() ? std::string("(no label)") : XmlRpc::user_agent;
+	else key_owner.clear();
+}
+
+static void log_unkey_blocked(char const *method) {
+	std::string owner;
+	{
+		std::lock_guard<std::mutex> lk(unkey_block_mx);
+		owner = key_owner;
+	}
+	std::stringstream s;
+	s << ztime() << " " << method << " OFF from " << XmlRpc::user_agent
+	  << " ignored (held by the Arbiter; radio keyed by " << owner << ")";
+	xml_trace(1, s.str().c_str());
+	LOG_ERROR("un-key from %s ignored (held by the Arbiter; radio keyed by %s)",
+		XmlRpc::user_agent.c_str(), owner.c_str());
+}
+
 XML_DATA xml_A;
 XML_DATA xml_B;
 int TOD_STALE  = 200; // 0.2 seconds
@@ -1954,6 +2000,10 @@ public:
 		// keyed the radio with the radio's OLD state -- a key request sent
 		// TX0, an unkey request sent TX1 and left the transmitter on.
 		int const want = int(params[0]);
+		if (unkey_blocked(want)) {   // [subspace] the Arbiter holds this program
+			log_unkey_blocked("rig.set_verify_ptt");
+			return;
+		}
 
 		std::stringstream s;
 		long start = zmsec();
@@ -1970,6 +2020,7 @@ public:
 
 		rigPTT(want);
 		ptt_reserve_end(); // [subspace] the reserved PTT change is done
+		note_key(want);    // [subspace] whose key this is (un-key block)
 		{
 			bool get = ptt_state();
 			int cnt = 0;
@@ -2008,6 +2059,10 @@ public:
 		// [subspace] requested state kept local until the lock is held
 		// (see rig_set_verify_ptt)
 		int const want = int(params[0]);
+		if (unkey_blocked(want)) {   // [subspace] the Arbiter holds this program
+			log_unkey_blocked("rig.set_ptt");
+			return;
+		}
 
 		std::stringstream s;
 		long start = zmsec();
@@ -2024,6 +2079,7 @@ public:
 
 		rigPTT(want);
 		ptt_reserve_end(); // [subspace] the reserved PTT change is done
+		note_key(want);    // [subspace] whose key this is (un-key block)
 		{
 			bool get = ptt_state();
 			int cnt = 0;
@@ -2099,6 +2155,10 @@ public:
 		// [subspace] requested state kept local until the lock is held
 		// (see rig_set_verify_ptt)
 		int const want = int(params[0]);
+		if (unkey_blocked(want)) {   // [subspace] the Arbiter holds this program
+			log_unkey_blocked("rig.set_ptt_fast");
+			return;
+		}
 
 		s << ztime();
 		#ifdef HAS_XMLRPC_CLIENT_ID
@@ -2115,6 +2175,7 @@ public:
 
 		rigPTT(want);
 		ptt_reserve_end(); // [subspace] the reserved PTT change is done
+		note_key(want);    // [subspace] whose key this is (un-key block)
 
 		s << " # " << ztime() << " [ " << zmsec() - start << " msec ]";
 		xml_trace(1, s.str().c_str());
@@ -2153,6 +2214,48 @@ public:
 	std::string help() { return std::string("reserve the radio for a PTT change within N msec"); }
 
 } rig_reserve_ptt(&rig_server);
+
+// [subspace] rig.block_unkey(label, ms): the Arbiter's hold for a program whose
+// own switch blocks its keys but not its un-keys. For ms (capped, renewed by
+// the Arbiter) a PTT OFF with HTTP User-Agent == label is answered and not
+// carried out, unless that label made the current key or no key is on record.
+// ms <= 0 or an empty label ends it. Never keys or un-keys anything itself.
+class rig_block_unkey : public XmlRpcServerMethod {
+public:
+	rig_block_unkey(XmlRpcServer* s) : XmlRpcServerMethod("rig.block_unkey", s) {}
+
+	void execute(XmlRpcValue& params, XmlRpcValue& result) {
+		std::string label = std::string(params[0]);
+		int ms = int(params[1]);
+		bool was;
+		{
+			std::lock_guard<std::mutex> lk(unkey_block_mx);
+			was = !unkey_block_label.empty() && reserve_clock_ms() < unkey_block_until;
+			if (ms <= 0 || label.empty()) {
+				unkey_block_label.clear();
+				unkey_block_until = 0;
+				ms = 0;
+			} else {
+				if (ms > (int)kUnkeyBlockMaxMs) ms = kUnkeyBlockMaxMs;
+				unkey_block_label = label;
+				unkey_block_until = reserve_clock_ms() + (unsigned long long)ms;
+			}
+		}
+		// log the start and the end, not every renewal
+		if ((ms > 0) != was) {
+			std::stringstream s;
+			s << ztime() << " rig.block_unkey " << (ms > 0 ? label : std::string("ended"));
+			if (ms > 0) s << " " << ms << " msec";
+			xml_trace(1, s.str().c_str());
+			if (ms > 0) LOG_ERROR("un-keys from %s blocked (held by the Arbiter)", label.c_str());
+			else LOG_ERROR("un-key block ended");
+		}
+		result = ms;
+	}
+
+	std::string help() { return std::string("block PTT OFF from a labelled program for N msec (the Arbiter's hold)"); }
+
+} rig_block_unkey(&rig_server);
 
 //------------------------------------------------------------------------------
 // Execute vfo Swap

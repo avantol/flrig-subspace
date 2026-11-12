@@ -33,6 +33,7 @@ using namespace XmlRpc;
 
 std::string XmlRpc::request_str = "";
 std::string XmlRpc::client_id = "";
+std::string XmlRpc::user_agent = "";
 
 // Static data
 const char XmlRpcServer::METHODNAME_TAG[] = "methodName";

@@ -96,12 +96,15 @@ XmlRpcServerConnection::readHeader()
   char *bp = 0;                       // Start of body
   char *lp = 0;                       // Start of content-length value
   char *kp = 0;                       // Start of connection value
+  char *up = 0;                       // [subspace] Start of user-agent value
 
   for (char *cp = hp; (bp == 0) && (cp < ep); ++cp) {
 	if ((ep - cp > 16) && (strncasecmp(cp, "Content-length: ", 16) == 0))
 	  lp = cp + 16;
 	else if ((ep - cp > 12) && (strncasecmp(cp, "Connection: ", 12) == 0))
 	  kp = cp + 12;
+	else if ((ep - cp > 12) && (strncasecmp(cp, "User-Agent: ", 12) == 0))
+	  up = cp + 12;
 	else if ((ep - cp > 4) && (strncmp(cp, "\r\n\r\n", 4) == 0))
 	  bp = cp + 4;
 	else if ((ep - cp > 2) && (strncmp(cp, "\n\n", 2) == 0))
@@ -149,8 +152,16 @@ XmlRpcServerConnection::readHeader()
   }
   XmlRpcUtil::log(3, "KeepAlive: %d", _keepAlive);
 
+  // [subspace] the label a program puts on its requests (VarAC: "XML-RPC.NET");
+  // kept per connection, made current only while this request executes
+  _userAgent.clear();
+  if (up != 0) {
+    char *e = up;
+    while (e < bp && *e != '\r' && *e != '\n') ++e;
+    _userAgent.assign(up, e - up);
+  }
 
-  _header = ""; 
+  _header = "";
   _connectionState = READ_REQUEST;
   return true;    // Continue monitoring this source
 }
@@ -247,6 +258,8 @@ XmlRpcServerConnection::writeResponse()
 //! Helper method to execute the client request
 void XmlRpcServerConnection::executeRequest()
 {
+  XmlRpc::user_agent = _userAgent;   // [subspace] current for the method only
   _response = _server->executeRequest(_request);
+  XmlRpc::user_agent.clear();
 }
 
