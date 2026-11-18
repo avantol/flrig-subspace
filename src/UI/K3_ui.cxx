@@ -98,14 +98,23 @@ void K3_set_split(int val)
 	selrig->set_split(val);
 }
 
-void K3_A2B()
+// [subspace] The caller holds mutex_serial. execute_A2B() runs under
+// serviceXCVR's lock and called K3_A2B(), which took the same lock again on
+// the same thread: the right mouse button on A/B stopped flrig for good.
+void K3_A2B_locked()
 {
-	guard_lock serial_lock(&mutex_serial);
 	vfoB = vfoA;
 	selrig->set_vfoB(vfoB.freq);
 	selrig->set_bwB(vfoB.iBW);
 	selrig->set_modeB(vfoB.imode);
 	FreqDispB->value(vfoB.freq);
+}
+
+// the A -> B button
+void K3_A2B()
+{
+	guard_lock serial_lock(&mutex_serial);
+	K3_A2B_locked();
 }
 
 void cb_K3_swapAB()

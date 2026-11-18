@@ -53,8 +53,73 @@ bool check_hex(const void *s, size_t len)
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
+#include <sys/select.h>
 
 #include <memory>
+#include <chrono>
+
+// [subspace] Time limit for the port to take the bytes of one write.
+// write() on this port was a blocking call with no limit: with the hardware
+// handshake (RTS/CTS) on and the radio not ready, or a USB adapter that
+// stopped taking data, it did not return -- and the caller holds
+// mutex_serial, so nothing else reached the radio either.
+// CHOSEN: 1000 ms. A write normally returns at once (the bytes go into the
+// driver's buffer); it waits only while that buffer is full, which commands
+// of tens of bytes do not cause on a working port. Under the lock wait limit
+// (LOCK_WAIT_LIMIT_MS, threads.cxx), so one write that is not taken does not
+// by itself get another program's request refused.
+#define SERIAL_WRITE_LIMIT_MS 1000
+
+// Writes n bytes, waiting at most SERIAL_WRITE_LIMIT_MS in all for the port
+// to take them; returns the number written. Past the limit, the bytes still
+// waiting in the driver are dropped (tcflush): a command the radio did not
+// get in time must not reach it later, when nobody expects it. The port is
+// switched to non-blocking for the write only; reads never wait on it (they
+// ask FIONREAD first). Timed on a clock that does not jump when the PC clock
+// is set.
+static int write_limited(int fd, const char *buff, int n)
+{
+	int const flags = fcntl(fd, F_GETFL);
+	if (flags == -1) return 0;   // not a usable descriptor: nothing can be written
+	fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+	std::chrono::steady_clock::time_point const deadline =
+		std::chrono::steady_clock::now() + std::chrono::milliseconds(SERIAL_WRITE_LIMIT_MS);
+	int done = 0;
+	bool timed_out = false;
+	while (done < n) {
+		ssize_t ret = write(fd, buff + done, n - done);
+		if (ret > 0) {
+			done += ret;
+			continue;
+		}
+		if (ret < 0 && errno == EINTR) continue;
+		if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+			break;   // port error (unplugged): as before, the missing reply reports it
+		long left = (long)std::chrono::duration_cast<std::chrono::milliseconds>(
+			deadline - std::chrono::steady_clock::now()).count();
+		if (left <= 0) {
+			timed_out = true;
+			break;
+		}
+		// select(), not poll(): poll() does not handle serial devices on every macOS
+		fd_set wfds;
+		FD_ZERO (&wfds);
+		FD_SET (fd, &wfds);
+		struct timeval tv;
+		tv.tv_sec = left / 1000;
+		tv.tv_usec = (left % 1000) * 1000;
+		select(fd + 1, NULL, &wfds, NULL, &tv);   // room, error or time up: the next write() or the clock decides
+	}
+
+	fcntl(fd, F_SETFL, flags);
+	if (timed_out) {
+		tcflush(fd, TCOFLUSH);
+		LOG_ERROR("serial write: the port took %d of %d bytes in %d ms; bytes not yet sent dropped",
+			done, n, SERIAL_WRITE_LIMIT_MS);
+	}
+	return done;
+}
 
 Cserial::Cserial() {
 	device = "/dev/ttyS0";
@@ -536,16 +601,18 @@ int Cserial::WriteBuffer(const char *buff, int n)
 */
 	FlushBuffer();
 
+	// [subspace] write_limited(): a write the port does not take ends after
+	// SERIAL_WRITE_LIMIT_MS (was: write(), no limit)
 	if (progStatus.serial_write_delay) {
-		size_t ret = 0;
+		int ret = 0;
 		for (int i = 0; i < n; i++) {
-			ret = write (fd, &buff[i], 1);
+			ret = write_limited (fd, &buff[i], 1);
 			bytes_written += ret;
+			if (ret != 1) break;   // not taken: the rest of the command is not sent
 			MilliSleep(progStatus.serial_write_delay);
 		}
 	} else {
-		size_t ret = write (fd, buff, n);
-		bytes_written = ret;
+		bytes_written = write_limited (fd, buff, n);
 	}
 
 	if (progStatus.serial_post_write_delay)
@@ -565,7 +632,7 @@ bool Cserial::WriteByte(char by)
 	if (fd < 0) return false;
 	static char buff[2];
 	buff[0] = by; buff[1] = 0;
-	return (write(fd, buff, 1) == 1);
+	return (write_limited(fd, buff, 1) == 1);
 }
 
 ///////////////////////////////////////////////////////

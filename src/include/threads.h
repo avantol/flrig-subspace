@@ -128,14 +128,25 @@ public:
 //	guard_lock(pthread_mutex_t* m, int h = 0);
 	guard_lock(pthread_mutex_t* m, std::string h = "", long tout = 500);
 	~guard_lock(void);
+	void unlock(void);   // [subspace] let go before the end of the block; the destructor then does nothing
 	const char *name(pthread_mutex_t *m);
 private:
 	pthread_mutex_t* mutex;
 	std::string how;
 	long int start_time;
 	long int time_out;
+	bool held;
 //	int how;
 };
+
+// [subspace] What a thread does when a lock is not free within the lock wait
+// limit (threads.cxx). 0 (every thread at its start): log it and keep
+// waiting. A thread that can answer "busy" instead -- the XML-RPC server
+// thread -- names a function here; it is called with a description of the
+// wait and must not return (it throws). Only called for a lock taken while
+// the thread holds no other guard_lock, so a request is refused before it
+// starts and never left half done.
+extern thread_local void (*lock_wait_give_up)(const char *what);
 
 struct cpreamble
 {

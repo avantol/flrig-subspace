@@ -124,6 +124,29 @@ static void log_unkey_blocked(char const *method) {
 		XmlRpc::user_agent.c_str(), owner.c_str());
 }
 
+// [subspace] Lock wait limit (threads.cxx): a request that needs a lock that
+// stays held is answered with a fault instead of never. Before this, the one
+// server thread waited for the lock for good and every program on the port
+// stopped getting answers. The request has not touched the radio: only the
+// first lock of a request is ever given up.
+static void xml_lock_give_up(const char *what)
+{
+	xmlrpc_pending = false;   // nothing is waiting any more: the serial loop need not yield
+	throw XmlRpc::XmlRpcException(
+		std::string("flrig: radio busy, request not carried out (").append(what).append(")"), -32000);
+}
+
+// [subspace] ...except a request that can END a transmission (PTT OFF, or a
+// raw CAT string, whose meaning flrig does not know): it waits for the lock,
+// as before. Refused, an un-key that arrives while the lock is held for a
+// long time would be lost and the radio would stay keyed; waiting, it is
+// carried out late.
+struct waits_for_lock {
+	void (*saved)(const char *);
+	waits_for_lock(bool waits) : saved(lock_wait_give_up) { if (waits) lock_wait_give_up = 0; }
+	~waits_for_lock() { lock_wait_give_up = saved; }
+};
+
 XML_DATA xml_A;
 XML_DATA xml_B;
 int TOD_STALE  = 200; // 0.2 seconds
@@ -2010,6 +2033,7 @@ public:
 
 		s << ztime() << " rig.set_verify_ptt " << (want ? "ON " : "OFF ");
 
+		waits_for_lock unkey(!want);   // [subspace] an un-key is never refused for a busy lock
 		xmlrpc_pending = true;
 		guard_lock ser_lock (&mutex_serial, "xml set verify ptt");
 		xmlrpc_pending = false;
@@ -2069,6 +2093,7 @@ public:
 
 		s << ztime() << " rig.set_ptt " << (want ? "ON " : "OFF ");
 
+		waits_for_lock unkey(!want);   // [subspace] an un-key is never refused for a busy lock
 		xmlrpc_pending = true;
 		guard_lock ser_lock (&mutex_serial, "xml set verify ptt");
 		xmlrpc_pending = false;
@@ -2166,6 +2191,7 @@ public:
 		#endif
 		s << " rig.set_ptt_fast " << (want ? "ON " : "OFF ");
 
+		waits_for_lock unkey(!want);   // [subspace] an un-key is never refused for a busy lock
 		xmlrpc_pending = true;
 		guard_lock ser_lock (&mutex_serial, "xml set ptt fast");
 		xmlrpc_pending = false;
@@ -4208,6 +4234,7 @@ public:
 		std::string cmd = recv_hex(command);
 
 		{
+			waits_for_lock raw_cat(true);   // [subspace] may be an un-key: never refused for a busy lock
 			xmlrpc_pending = true;
 			guard_lock serial_lock(&mutex_serial, "rig_cmd_string");
 			xmlrpc_pending = false;
@@ -4241,6 +4268,7 @@ public:
 		std::string cmd = recv_hex(command);
 
 		{
+			waits_for_lock raw_cat(true);   // [subspace] may be an un-key: never refused for a busy lock
 			guard_lock lock2(&mutex_serial, "xml cat string");
 
 			if (progStatus.use_tcpip) 
@@ -4447,6 +4475,7 @@ public:
 		Fl::awake(connection_ON);
 
 		int key = int(params[0]);
+		waits_for_lock unkey(!key);   // [subspace] key up is never refused for a busy lock
 		cwio_key(key);
 	}
 
@@ -5460,6 +5489,7 @@ void * xml_thread_loop(void *d)
 		MilliSleep(1000);
 	}
 	if (!run_server) return NULL;
+	lock_wait_give_up = xml_lock_give_up;   // [subspace] this thread answers "busy" instead of waiting for good
 	rig_server.enableIntrospection(true);
 	for(;;) {
 		if (!run_server) break;

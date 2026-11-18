@@ -98,14 +98,21 @@ void KX3_set_split(int val)
 	selrig->set_split(val);
 }
 
-void cb_KX3_A2B()
+// [subspace] The caller holds mutex_serial (see K3_A2B_locked, K3_ui.cxx).
+void KX3_A2B_locked()
 {
-	guard_lock serial_lock(&mutex_serial);
 	vfoB = vfoA;
 	selrig->set_vfoB(vfoB.freq);
 	selrig->set_bwB(vfoB.iBW);
 	selrig->set_modeB(vfoB.imode);
 	FreqDispB->value(vfoB.freq);
+}
+
+// the A -> B button
+void cb_KX3_A2B()
+{
+	guard_lock serial_lock(&mutex_serial);
+	KX3_A2B_locked();
 }
 
 void cb_KX3_swapAB()

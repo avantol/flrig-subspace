@@ -2600,6 +2600,14 @@ trace(1, "selrig->initialize()");
 
 					box_xcvr_connect->color(FL_BACKGROUND2_COLOR);
 					box_xcvr_connect->redraw();
+
+					// [subspace] The box below stays up until the operator
+					// closes it. The serial lock was held all that time, so
+					// every program asking flrig waited with it. Stop the
+					// serial loop first, then let go of the lock.
+					bypass_serial_thread_loop = true;
+					gl_serial.unlock();
+
 					fl_alert2(_("\
 		Transceiver not responding!\n\n\
 		Check serial (COM) port connection\n\
@@ -2608,7 +2616,6 @@ trace(1, "selrig->initialize()");
 		Check that Baud matches transceiver baud\n\n\
 		Press 'Init' button."));
 
-					bypass_serial_thread_loop = true;
 					return;
 				}
 			}

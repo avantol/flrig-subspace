@@ -29,6 +29,7 @@ extern void read_KX3_bw();
 
 extern void KX3_set_split(int val);
 extern void cb_KX3_A2B();
+extern void KX3_A2B_locked();   // [subspace] caller holds mutex_serial
 extern void cb_KX3_swapAB();
 extern void cb_KX3_IFsh();
 

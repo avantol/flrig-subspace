@@ -26,4 +26,5 @@ void read_K3_bw();
 
 void K3_set_split(int val);
 void K3_A2B();
+void K3_A2B_locked();   // [subspace] caller holds mutex_serial
 void cb_K3_swapAB();

@@ -2758,12 +2758,13 @@ void cbAswapB()
 	serviceXCVR(xcvr);
 }
 
+// called by serviceXCVR, which holds mutex_serial
 void execute_A2B()
 {
 	if (xcvr_name == rig_K3.name_) {
-		K3_A2B();
+		K3_A2B_locked();
 	} else if (xcvr_name == rig_KX3.name_ || xcvr_name == rig_K4.name_) {
-		cb_KX3_A2B();
+		KX3_A2B_locked();
 	} else if (xcvr_name == rig_K2.name_) {
 		trace(1,"execute A2B() 1");
 		vfoB = vfoA;
